@@ -10,8 +10,7 @@ import pytest
 from src.tools.repo_tools import (
     clone_repo_sandbox,
     extract_git_history,
-    analyze_directory_structure,
-    analyze_graph_structure,
+    analyze_graph_structure,    
 )
 
 
