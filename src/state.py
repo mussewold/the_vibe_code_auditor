@@ -66,6 +66,10 @@ class AgentState(TypedDict):
     repo_url: str
     pdf_path: str
     rubric_dimensions: List[Dict]
+    synthesis_rules: Dict
+    github_rubric: List[Dict]
+    pdf_report_rubric: List[Dict]
+    pdf_images_rubric: List[Dict]
     # Use reducers to prevent parallel agents
     # from overwriting data
     evidences: Annotated[
