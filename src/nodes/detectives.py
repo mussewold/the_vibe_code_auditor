@@ -1,10 +1,20 @@
 from typing import Dict, List
+from pathlib import Path
 
 from src.state import AgentState, Evidence
 from src.tools.repo_tools import (
     analyze_state_structure,
     clone_repo_sandbox,
     extract_git_history,
+)
+from src.tools.doc_tools import (
+    analyze_concept_depth,
+    cross_reference,
+    extract_cited_paths,
+    find_relevant_chunks,
+    ingest_pdf,
+    markdown_read,
+    pdf_parse,
 )
 
 
@@ -180,12 +190,215 @@ def repo_investigator_node(state: AgentState) -> AgentState:
 
 def doc_analyst_node(state: AgentState) -> AgentState:
     """
-    LangGraph node that performs document analysis:
+    DocAnalyst — The Paperwork / Context Detective
 
-    - Extracts text from the document.
-    - Extracts metadata from the document.
-    - Extracts the document's structure.
+    Executes a lightweight RAG-style analysis over the PDF report:
+    - Ingests and chunks the report.
+    - Protocol A: checks that cited file paths actually exist in the repo.
+    - Protocol B: verifies depth of treatment for key concepts.
+    - Answers: "What does the report say about Dialectical Synthesis?"
     """
+
+    evidences = state.get("evidences", {}) or {}
+    doc_evidence_list: List[Evidence] = evidences.get("DocAnalyst", [])
+
+    pdf_path = state.get("pdf_path", "")
+    if not pdf_path:
+        doc_evidence_list.append(
+            Evidence(
+                goal="PDF report provided",
+                found=False,
+                content=None,
+                location="n/a",
+                rationale="No pdf_path supplied in AgentState.",
+                confidence=0.2,
+            )
+        )
+        evidences["DocAnalyst"] = doc_evidence_list
+        state["evidences"] = evidences
+        return state
+
+    report_path = Path(pdf_path)
+
+    if not report_path.exists():
+        doc_evidence_list.append(
+            Evidence(
+                goal="PDF report exists on disk",
+                found=False,
+                content=None,
+                location=str(report_path),
+                rationale="pdf_path is set but the file does not exist.",
+                confidence=0.3,
+            )
+        )
+        evidences["DocAnalyst"] = doc_evidence_list
+        state["evidences"] = evidences
+        return state
+
+    # ------------------------------------------------------
+    # Load full text + RAG-lite chunks
+    # ------------------------------------------------------
+    try:
+        if report_path.suffix.lower() == ".pdf":
+            full_text = pdf_parse(str(report_path))
+        else:
+            full_text = markdown_read(str(report_path))
+    except Exception as e:
+        doc_evidence_list.append(
+            Evidence(
+                goal="PDF report successfully parsed",
+                found=False,
+                content=str(e),
+                location=str(report_path),
+                rationale=(
+                    "Failed to parse report using available backends "
+                    "(Docling / PyPDF2 / text reader)."
+                ),
+                confidence=0.3,
+            )
+        )
+        evidences["DocAnalyst"] = doc_evidence_list
+        state["evidences"] = evidences
+        return state
+
+    chunks = ingest_pdf(str(report_path))
+
+    # ------------------------------------------------------
+    # Protocol A — Citation Check
+    # ------------------------------------------------------
+    cited_paths = extract_cited_paths(full_text)
+
+    citation_lines: List[str] = []
+    missing_any = False
+
+    if not cited_paths:
+        citation_lines.append("No explicit src/... or tests/... Python paths cited.")
+    else:
+        citation_lines.append("Cited file paths discovered in report:")
+        for cited in cited_paths:
+            ref = cross_reference(cited)
+            exists = bool(ref.get("exists"))
+            resolved_path = ref.get("resolved_path", "")
+
+            status = "OK" if exists else "Hallucination — missing on disk"
+            if not exists:
+                missing_any = True
+
+            citation_lines.append(f"- {cited}  →  {status} ({resolved_path})")
+
+    doc_evidence_list.append(
+        Evidence(
+            goal="Protocol A — Report citations match repository structure",
+            found=not missing_any,
+            content="\n".join(citation_lines),
+            location=str(report_path),
+            rationale=(
+                "Scanned the report for src/... and tests/... Python paths and "
+                "cross-referenced them against the local filesystem. Any cited "
+                "file that does not exist is flagged as a hallucination."
+            ),
+            confidence=0.85,
+        )
+    )
+
+    # ------------------------------------------------------
+    # Protocol B — Concept Verification
+    # ------------------------------------------------------
+    ds_stats = analyze_concept_depth(full_text, "Dialectical Synthesis")
+    meta_stats = analyze_concept_depth(full_text, "Metacognition")
+
+    def _summarize_term(stats: Dict[str, object]) -> str:
+        term = stats.get("term", "")
+        occurrences = stats.get("occurrences", 0)
+        deep = stats.get("deep_explanations", 0)
+        shallow = stats.get("shallow_mentions", 0)
+        examples = stats.get("examples", []) or []
+
+        lines: List[str] = []
+        lines.append(f"Term: {term}")
+        lines.append(f"- Occurrences: {occurrences}")
+        lines.append(f"- Deep explanations: {deep}")
+        lines.append(f"- Shallow mentions: {shallow}")
+        if examples:
+            lines.append("- Representative excerpts:")
+            for i, ex in enumerate(examples, start=1):
+                lines.append(f"  ({i}) {ex.strip()}")
+        return "\n".join(lines)
+
+    concept_lines: List[str] = []
+    concept_lines.append(_summarize_term(ds_stats))
+    concept_lines.append("")
+    concept_lines.append(_summarize_term(meta_stats))
+
+    deep_enough = bool(ds_stats.get("deep_explanations")) and bool(
+        meta_stats.get("deep_explanations")
+    )
+
+    doc_evidence_list.append(
+        Evidence(
+            goal="Protocol B — Deep treatment of Dialectical Synthesis and Metacognition",
+            found=deep_enough,
+            content="\n".join(concept_lines),
+            location=str(report_path),
+            rationale=(
+                "Classified mentions of each concept as shallow vs deep based on "
+                "surrounding context length and implementation-oriented language. "
+                "Credit is given only when the report appears to operationalize "
+                "the concepts in the system architecture."
+            ),
+            confidence=0.7,
+        )
+    )
+
+    # ------------------------------------------------------
+    # RAG-lite answer: Dialectical Synthesis
+    # ------------------------------------------------------
+    relevant = find_relevant_chunks(chunks, ["Dialectical Synthesis"])
+
+    if not relevant:
+        doc_evidence_list.append(
+            Evidence(
+                goal="Answer: What does the report say about Dialectical Synthesis?",
+                found=False,
+                content=None,
+                location=str(report_path),
+                rationale=(
+                    "No chunks mentioning 'Dialectical Synthesis' were found in "
+                    "the report during retrieval."
+                ),
+                confidence=0.4,
+            )
+        )
+    else:
+        lines: List[str] = []
+        lines.append(
+            "Below are direct excerpts from the report near mentions of "
+            "'Dialectical Synthesis'. These are retrieved chunks, not "
+            "rephrased summaries:"
+        )
+        for idx, chunk in relevant:
+            lines.append("")
+            lines.append(f"[Chunk {idx}]")
+            lines.append(chunk.strip())
+
+        doc_evidence_list.append(
+            Evidence(
+                goal="Answer: What does the report say about Dialectical Synthesis?",
+                found=True,
+                content="\n".join(lines),
+                location=str(report_path),
+                rationale=(
+                    "Constructed an answer by retrieving the most relevant "
+                    "chunks mentioning 'Dialectical Synthesis' from the report, "
+                    "avoiding additional abstraction to reduce hallucination risk."
+                ),
+            confidence=0.8,
+            )
+        )
+
+    evidences["DocAnalyst"] = doc_evidence_list
+    state["evidences"] = evidences
+
     return state
 
 def vision_inspector_node(state: AgentState) -> AgentState:
