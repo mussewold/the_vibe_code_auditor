@@ -2,100 +2,109 @@ from typing import Dict, List
 
 from src.state import AgentState, Evidence
 from src.tools.repo_tools import (
-    analyze_directory_structure,
-    analyze_graph_structure,
+    analyze_state_structure,
     clone_repo_sandbox,
     extract_git_history,
 )
 
 
 def _summarize_repo_forensics(
-    directory_findings: Dict,
     graph_findings: Dict,
     history: Dict,
 ) -> str:
     """
-    Create a human-readable forensic summary for the RepoInvestigator.
+    Human-readable forensic narrative aligned with
+    Protocol A (State), Protocol B (Graph Wiring),
+    Protocol C (Git Narrative).
     """
 
     lines: List[str] = []
+    lines.append("Repository Forensic Summary")
 
-    # Directory / artifact overview
-    lines.append("Repository Forensic Summary:")
+    # ------------------------------------------------------
+    # Protocol A — State Structure
+    # ------------------------------------------------------
+    lines.append("\n[Protocol A — State Structure]")
 
-    if directory_findings:
-        lines.append("\n[Structure]")
-        for path, exists in directory_findings.get("directories", {}).items():
-            lines.append(f"- dir {path}: {'present' if exists else 'missing'}")
-        for path, exists in directory_findings.get("files", {}).items():
-            lines.append(f"- file {path}: {'present' if exists else 'missing'}")
+    if graph_findings.get("state_files_found"):
+        lines.append("- state.py / graph.py: present")
+    else:
+        lines.append("- state.py / graph.py: NOT found")
 
-    # Graph structure
-    if graph_findings:
-        lines.append("\n[LangGraph Structure]")
-        if graph_findings.get("stategraph_detected"):
-            lines.append("- StateGraph: detected")
-        else:
-            lines.append("- StateGraph: not detected")
+    if graph_findings.get("typed_state_detected"):
+        lines.append("- Typed state schema: detected")
+    else:
+        lines.append("- Typed state schema: NOT detected")
 
-        if graph_findings.get("typed_state_detected"):
-            lines.append("- Typed state model: detected")
-        else:
-            lines.append("- Typed state model: not detected")
+    # ------------------------------------------------------
+    # Protocol B — Graph Wiring
+    # ------------------------------------------------------
+    lines.append("\n[Protocol B — Graph Wiring]")
 
-        edges = graph_findings.get("edges", []) or []
-        if edges:
-            lines.append("- Edges:")
-            for src, dst in edges:
-                lines.append(f"  - {src} -> {dst}")
+    if graph_findings.get("stategraph_detected"):
+        lines.append("- StateGraph instantiation: detected")
+    else:
+        lines.append("- StateGraph instantiation: NOT detected")
 
-        if graph_findings.get("fan_out_detected"):
-            lines.append("- Fan-out: detected (branching from a single node)")
-        else:
-            lines.append("- Fan-out: not detected")
+    edges = graph_findings.get("edges", []) or []
 
-    # Git history
-    if history:
-        lines.append("\n[Git History]")
-        if history.get("errors"):
-            lines.append(f"- Error reading history: {history['errors']}")
-        else:
-            commit_count = history.get("commit_count", 0)
-            lines.append(f"- Commit count: {commit_count}")
-            if history.get("is_monolithic"):
-                lines.append("- Pattern: monolithic or near-monolithic history")
-            else:
-                lines.append("- Pattern: incremental history")
+    if edges:
+        lines.append("- Graph edges:")
+        for src, dst in edges:
+            lines.append(f"  • {src} → {dst}")
+    else:
+        lines.append("- No edges discovered")
 
-            commits = history.get("commits", []) or []
-            if commits:
-                lines.append("- First commits:")
-                for commit in commits[:5]:
-                    message = commit.get("message")
-                    lines.append(
-                        f"  - {commit.get('hash')} "
-                        f"@ {commit.get('timestamp')}: "
-                        f'\"{message}\"'
-                    )
+    if graph_findings.get("fan_out_detected"):
+        lines.append("- Parallel fan-out architecture: detected ✅")
+    else:
+        lines.append("- Parallel fan-out architecture: NOT detected ❌")
+
+    # ------------------------------------------------------
+    # Protocol C — Git Narrative
+    # ------------------------------------------------------
+    lines.append("\n[Protocol C — Git Narrative]")
+
+    if history.get("errors"):
+        lines.append(f"- Git analysis error: {history['errors']}")
+    else:
+        lines.append(f"- Commit count: {history.get('commit_count', 0)}")
+        lines.append(
+            f"- Development style: {history.get('development_style')}"
+        )
+
+        commits = history.get("commits", [])[:5]
+
+        if commits:
+            lines.append("- Early commit timeline:")
+            for c in commits:
+                lines.append(
+                    f"  • {c['hash']} @ {c['timestamp']} — {c['message']}"
+                )
 
     return "\n".join(lines)
 
 
 def repo_investigator_node(state: AgentState) -> AgentState:
     """
-    LangGraph node that performs repository forensics:
+    RepoInvestigator — The Code Detective
 
-    - Clones the target repository into a sandboxed temp directory.
-    - Uses AST-based analysis to detect LangGraph structures.
-    - Uses git log to build a lightweight commit narrative.
-    - Emits structured Evidence into the graph state.
+    Executes:
+    - sandbox clone
+    - Protocol A/B AST investigation
+    - Protocol C git narrative analysis
     """
 
     repo_url = state.get("repo_url", "")
 
-    evidences: Dict[str, List[Evidence]] = state.get("evidences", {}) or {}
-    repo_evidence_list: List[Evidence] = evidences.get("RepoInvestigator", [])
+    evidences = state.get("evidences", {}) or {}
+    repo_evidence_list: List[Evidence] = evidences.get(
+        "RepoInvestigator", []
+    )
 
+    # ------------------------------------------------------
+    # Missing repo URL
+    # ------------------------------------------------------
     if not repo_url:
         repo_evidence_list.append(
             Evidence(
@@ -103,8 +112,7 @@ def repo_investigator_node(state: AgentState) -> AgentState:
                 found=False,
                 content=None,
                 location="n/a",
-                rationale="No repo_url supplied in AgentState; "
-                "cannot perform repository forensics.",
+                rationale="No repository URL supplied.",
                 confidence=0.2,
             )
         )
@@ -112,18 +120,19 @@ def repo_investigator_node(state: AgentState) -> AgentState:
         state["evidences"] = evidences
         return state
 
+    # ------------------------------------------------------
+    # Sandbox clone
+    # ------------------------------------------------------
     try:
         local_repo_path = clone_repo_sandbox(repo_url)
-    except Exception as e:  # git auth / network / repo errors
+    except Exception as e:
         repo_evidence_list.append(
             Evidence(
-                goal="Repository successfully cloned into sandbox",
+                goal="Repository cloned safely",
                 found=False,
                 content=str(e),
                 location=repo_url,
-                rationale="Failed to clone repository into a sandboxed "
-                "directory. This is often due to authentication or "
-                "network issues.",
+                rationale="Clone failed (authentication/network).",
                 confidence=0.4,
             )
         )
@@ -131,31 +140,36 @@ def repo_investigator_node(state: AgentState) -> AgentState:
         state["evidences"] = evidences
         return state
 
-    # At this point we have a local sandboxed clone; all subsequent analysis
-    # operates only on that local path.
-    directory_findings = analyze_directory_structure(local_repo_path)
-    graph_findings = analyze_graph_structure(local_repo_path)
+    # ------------------------------------------------------
+    # Forensic protocols
+    # ------------------------------------------------------
+    graph_findings = analyze_state_structure(local_repo_path)
     history = extract_git_history(local_repo_path)
 
     summary = _summarize_repo_forensics(
-        directory_findings=directory_findings,
         graph_findings=graph_findings,
         history=history,
     )
 
+    # Success condition aligned with rubric:
+    # must prove graph + typed state + git readable
+    success = (
+        graph_findings.get("stategraph_detected")
+        and graph_findings.get("typed_state_detected")
+        and not history.get("errors")
+    )
+
     repo_evidence_list.append(
         Evidence(
-            goal="Repository satisfies LangGraph forensic requirements",
-            found=bool(graph_findings.get("stategraph_detected"))
-            and not bool(history.get("errors")),
+            goal="Repository passes forensic LangGraph validation",
+            found=bool(success),
             content=summary,
             location=local_repo_path,
             rationale=(
-                "Analyzed a sandboxed clone of the repository using the "
-                "Python AST module for StateGraph/typed-state detection and "
-                "git log for commit history, without relying on regex."
+                "Repository analyzed using AST structural inspection "
+                "and git forensic narrative without regex reliance."
             ),
-            confidence=0.8,
+            confidence=0.85 if success else 0.6,
         )
     )
 
@@ -183,8 +197,6 @@ def vision_inspector_node(state: AgentState) -> AgentState:
     - Extracts the rubric's scoring.
     """
     return state
-
-
 
 def evidence_aggregator_node(state: AgentState) -> AgentState:
     """
