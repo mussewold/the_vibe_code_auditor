@@ -6,8 +6,9 @@ from src.nodes.detectives import (
     repo_investigator_node,
     doc_analyst_node,
     vision_inspector_node,
+    evidence_aggregator_node
 )
-from src.nodes.justice import evidence_aggregator_node, prosecutor_node, defense_attorney_node, tech_lead_node
+from src.nodes.justice import prosecutor_node, defense_attorney_node, tech_lead_node
 from src.nodes.judges import chief_justice_node
 
 builder = StateGraph(AgentState)
@@ -21,9 +22,9 @@ builder.add_node("DocAnalyst", doc_analyst_node)
 builder.add_node("VisionInspector", vision_inspector_node)
 
 # Fan-out (PARALLEL)
-builder.add_edge("ContextBuilder", "RepoInvestigator")
-builder.add_edge("ContextBuilder", "DocAnalyst")
-builder.add_edge("ContextBuilder", "VisionInspector")
+#builder.add_edge("ContextBuilder", "RepoInvestigator")
+#builder.add_edge("ContextBuilder", "DocAnalyst")
+#builder.add_edge("ContextBuilder", "VisionInspector")
 
 # --- Synchronization node ---
 builder.add_node("EvidenceAggregator", evidence_aggregator_node)
