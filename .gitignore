@@ -9,3 +9,7 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+
+#audit history of LangGraph
+audit_history.sqlite

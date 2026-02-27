@@ -6,8 +6,8 @@ from src.nodes.detectives import (
     repo_investigator_node,
     doc_analyst_node,
     vision_inspector_node,
-    evidence_aggregator_node
 )
+from src.nodes.evidence_aggregator import evidence_aggregator_node
 from src.nodes.justice import prosecutor_node, defense_attorney_node, tech_lead_node
 from src.nodes.judges import chief_justice_node
 

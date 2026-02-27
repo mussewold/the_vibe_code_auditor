@@ -11,16 +11,4 @@ def chief_justice_node(state: AgentState) -> AgentState:
     - Reviews the evidence and the opinions.
     - Provides a final report.
     """
-
-    return state
-
-from src.state import AgentState
-
-def chief_justice_node(state: AgentState) -> AgentState:
-    """
-    LangGraph node that performs the chief justice's role:
-
-    - Reviews the evidence and the opinions.
-    - Provides a final report.
-    """
-    return state
+    return {}
