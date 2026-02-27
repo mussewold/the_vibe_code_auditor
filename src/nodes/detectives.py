@@ -393,7 +393,75 @@ def vision_inspector_node(state: AgentState) -> AgentState:
     - Extracts the rubric's criteria.
     - Extracts the rubric's scoring.
     """
-    return {}
+    from src.tools.vision_tools import extract_images_from_pdf, analyze_diagram_with_llm
+
+    pdf_path = state.get("pdf_path", "")
+    evidences = state.get("evidences", {}) or {}
+    vision_evidence_list: List[Evidence] = evidences.get("VisionInspector", [])
+
+    if not pdf_path or not Path(pdf_path).exists():
+        vision_evidence_list.append(
+            Evidence(
+                goal="PDF report provided for image extraction",
+                found=False,
+                content=None,
+                location="n/a",
+                rationale="No valid pdf_path supplied in AgentState.",
+                confidence=0.2,
+            )
+        )
+        return {"evidences": {"VisionInspector": vision_evidence_list}}
+        
+    try:
+        images = extract_images_from_pdf(pdf_path)
+    except Exception as e:
+        vision_evidence_list.append(
+            Evidence(
+                goal="PDF images extracted successfully",
+                found=False,
+                content=str(e),
+                location=pdf_path,
+                rationale="PyMuPDF failed to extract images from the report.",
+                confidence=0.3,
+            )
+        )
+        return {"evidences": {"VisionInspector": vision_evidence_list}}
+
+    if not images:
+        vision_evidence_list.append(
+            Evidence(
+                goal="Report contains architectural diagrams",
+                found=False,
+                content="0 images found",
+                location=pdf_path,
+                rationale="The report does not contain any images or diagrams.",
+                confidence=0.9,
+            )
+        )
+        return {"evidences": {"VisionInspector": vision_evidence_list}}
+        
+    # Analyze the first extracted image as a heuristic
+    first_img = images[0]
+    llm_analysis = analyze_diagram_with_llm(
+        image_b64=first_img["data"],
+        mime_type=first_img["ext"]
+    )
+    
+    is_valid_diagram = llm_analysis.get("is_stategraph", False)
+    rationale = llm_analysis.get("rationale", "No rationale provided by Vision model.")
+    
+    vision_evidence_list.append(
+        Evidence(
+            goal="Diagram accurately represents the StateGraph architecture",
+            found=is_valid_diagram,
+            content=f"Evaluated Page {first_img['page']}, Image Index {first_img['index']}",
+            location=pdf_path,
+            rationale=rationale,
+            confidence=0.8,
+        )
+    )
+
+    return {"evidences": {"VisionInspector": vision_evidence_list}}
 
 def evidence_aggregator_node(state: AgentState) -> AgentState:
     """
