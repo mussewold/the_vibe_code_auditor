@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "langgraph>=1.0.9",
+    "langgraph-checkpoint-sqlite>=3.0.3",
+    "pypdf2>=3.0.1",
     "pytest>=9.0.2",
     "python-dotenv>=1.2.1",
     "tree-sitter>=0.25.2",
