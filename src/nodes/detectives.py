@@ -126,9 +126,7 @@ def repo_investigator_node(state: AgentState) -> AgentState:
                 confidence=0.2,
             )
         )
-        evidences["RepoInvestigator"] = repo_evidence_list
-        state["evidences"] = evidences
-        return state
+        return {"evidences": {"RepoInvestigator": repo_evidence_list}}
 
     # ------------------------------------------------------
     # Sandbox clone
@@ -146,9 +144,7 @@ def repo_investigator_node(state: AgentState) -> AgentState:
                 confidence=0.4,
             )
         )
-        evidences["RepoInvestigator"] = repo_evidence_list
-        state["evidences"] = evidences
-        return state
+        return {"evidences": {"RepoInvestigator": repo_evidence_list}}
 
     # ------------------------------------------------------
     # Forensic protocols
@@ -183,10 +179,7 @@ def repo_investigator_node(state: AgentState) -> AgentState:
         )
     )
 
-    evidences["RepoInvestigator"] = repo_evidence_list
-    state["evidences"] = evidences
-
-    return state
+    return {"evidences": {"RepoInvestigator": repo_evidence_list}}
 
 def doc_analyst_node(state: AgentState) -> AgentState:
     """
@@ -214,9 +207,7 @@ def doc_analyst_node(state: AgentState) -> AgentState:
                 confidence=0.2,
             )
         )
-        evidences["DocAnalyst"] = doc_evidence_list
-        state["evidences"] = evidences
-        return state
+        return {"evidences": {"DocAnalyst": doc_evidence_list}}
 
     report_path = Path(pdf_path)
 
@@ -231,9 +222,7 @@ def doc_analyst_node(state: AgentState) -> AgentState:
                 confidence=0.3,
             )
         )
-        evidences["DocAnalyst"] = doc_evidence_list
-        state["evidences"] = evidences
-        return state
+        return {"evidences": {"DocAnalyst": doc_evidence_list}}
 
     # ------------------------------------------------------
     # Load full text + RAG-lite chunks
@@ -257,9 +246,7 @@ def doc_analyst_node(state: AgentState) -> AgentState:
                 confidence=0.3,
             )
         )
-        evidences["DocAnalyst"] = doc_evidence_list
-        state["evidences"] = evidences
-        return state
+        return {"evidences": {"DocAnalyst": doc_evidence_list}}
 
     chunks = ingest_pdf(str(report_path))
 
@@ -396,10 +383,7 @@ def doc_analyst_node(state: AgentState) -> AgentState:
             )
         )
 
-    evidences["DocAnalyst"] = doc_evidence_list
-    state["evidences"] = evidences
-
-    return state
+    return {"evidences": {"DocAnalyst": doc_evidence_list}}
 
 def vision_inspector_node(state: AgentState) -> AgentState:
     """
@@ -409,7 +393,7 @@ def vision_inspector_node(state: AgentState) -> AgentState:
     - Extracts the rubric's criteria.
     - Extracts the rubric's scoring.
     """
-    return state
+    return {}
 
 def evidence_aggregator_node(state: AgentState) -> AgentState:
     """
@@ -437,7 +421,4 @@ def evidence_aggregator_node(state: AgentState) -> AgentState:
             confidence=0.9,
         )
     )
-    evidences["EvidenceAggregator"] = summary_list
-    state["evidences"] = evidences
-
-    return state
+    return {"evidences": {"EvidenceAggregator": summary_list}}

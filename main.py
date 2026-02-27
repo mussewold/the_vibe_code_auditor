@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 from typing import Any, Dict, List
 
+from dotenv import load_dotenv
 from src.graph import graph
+
+load_dotenv()
 
 
 def build_initial_state(repo_url: str) -> Dict[str, Any]:

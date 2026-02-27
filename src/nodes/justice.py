@@ -7,7 +7,7 @@ def prosecutor_node(state: AgentState) -> AgentState:
     - Reviews the evidence and the opinions.
     - Provides a final report.
     """
-    return state
+    return {}
 
 
 def defense_attorney_node(state: AgentState) -> AgentState: 
@@ -17,7 +17,7 @@ def defense_attorney_node(state: AgentState) -> AgentState:
     - Reviews the evidence and the opinions.
     - Provides a final report.
     """
-    return state
+    return {}
 
 
 def tech_lead_node(state: AgentState) -> AgentState:
@@ -27,4 +27,4 @@ def tech_lead_node(state: AgentState) -> AgentState:
     - Reviews the evidence and the opinions.
     - Provides a final report.
     """
-    return state
+    return {}
