@@ -96,6 +96,38 @@ def rule_of_functionality_architecture(
     )
 
 
+def rule_of_evidence_hallucination(
+    judge_op: JudicialOpinion | None,
+    evidences: Dict[str, List[Evidence]],
+) -> bool:
+    """
+    If a Judge claims a feature exists (e.g. parallelism, reducer) 
+    that the RepoInvestigator found no evidence for, overrule it.
+    """
+    if judge_op is None or not (judge_op.argument or "").strip():
+        return False
+        
+    arg = (judge_op.argument or "").lower()
+    repo_evs = evidences.get("RepoInvestigator", [])
+    repo_content = "\n".join((ev.content or "").lower() for ev in repo_evs)
+    
+    # Check for parallelism hallucination
+    if "parallel" in arg or "fan-out" in arg:
+        if "parallel fan-out architecture: not detected" in repo_content or "no edges discovered" in repo_content:
+            return True
+            
+    # Check for state/reducer hallucination
+    if "reducer" in arg or "operator.add" in arg or "operator.ior" in arg:
+        has_reducer_signal = any(
+            marker in repo_content 
+            for marker in ["operator.add", "operator.ior", "reducer"]
+        )
+        if not has_reducer_signal:
+            return True
+            
+    return False
+
+
 def final_score_for_criterion(
     criterion_id: str,
     prosecutor_op: JudicialOpinion | None,
@@ -104,27 +136,59 @@ def final_score_for_criterion(
     evidences: Dict[str, List[Evidence]],
 ) -> int:
     """Apply deliberation rules to compute final score (1–5)."""
-    if tech_lead_op is not None:
-        score = tech_lead_op.score
-    elif defense_op is not None and prosecutor_op is not None:
-        score = (prosecutor_op.score + defense_op.score) // 2
-    elif defense_op is not None:
-        score = defense_op.score
-    elif prosecutor_op is not None:
-        score = prosecutor_op.score
-    else:
-        score = 3
+    
+    # Rule of Evidence: Filter or penalize hallucinating opinions
+    judge_ops = [prosecutor_op, defense_op, tech_lead_op]
+    valid_scores = []
+    
+    for op in judge_ops:
+        if op is None:
+            continue
+        if rule_of_evidence_hallucination(op, evidences):
+            # Overrule: Cap score at 2 if they are hallucinating features
+            valid_scores.append(min(op.score, 2))
+        else:
+            valid_scores.append(op.score)
 
+    if not valid_scores:
+        return 3
+
+    # Rule of Functionality: Tech Lead weight for architecture
+    if criterion_id in ARCHITECTURE_CRITERION_IDS and tech_lead_op is not None:
+        # If Tech Lead is valid (not hallucinating), it carries 50% weight
+        is_hallucinating = rule_of_evidence_hallucination(tech_lead_op, evidences)
+        if not is_hallucinating:
+            other_scores = [s for s in valid_scores if s != tech_lead_op.score]
+            if other_scores:
+                score = int((0.5 * tech_lead_op.score) + (0.5 * sum(other_scores)/len(other_scores)) + 0.5)
+            else:
+                score = tech_lead_op.score
+        else:
+            score = int(sum(valid_scores) / len(valid_scores) + 0.5)
+    else:
+        score = int(sum(valid_scores) / len(valid_scores) + 0.5)
+
+    # Rule of Security: Cap at 3
     if rule_of_security(prosecutor_op):
         score = min(score, 3)
 
-    if rule_of_evidence_defense_overruled(defense_op, evidences):
-        score = min(score, 3)
-
-    if rule_of_functionality_architecture(criterion_id, tech_lead_op):
-        score = max(score, tech_lead_op.score if tech_lead_op else score)
-
     return max(1, min(5, score))
+
+
+def detect_score_variance(
+    prosecutor_op: JudicialOpinion | None,
+    defense_op: JudicialOpinion | None,
+    tech_lead_op: JudicialOpinion | None,
+) -> bool:
+    """True if the difference between any two judge scores is > 2."""
+    scores = [
+        op.score 
+        for op in (prosecutor_op, defense_op, tech_lead_op) 
+        if op is not None
+    ]
+    if len(scores) < 2:
+        return False
+    return (max(scores) - min(scores)) > 2
 
 
 def dissent_summary(

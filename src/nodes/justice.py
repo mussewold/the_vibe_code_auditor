@@ -481,12 +481,21 @@ def tech_lead_node(state: AgentState) -> AgentState:
         forensic_instruction = str(dim.get("forensic_instruction") or "")
 
         # Realistic score: 1 (critical), 3 (debt but viable), 5 (sound)
-        if critical_issues and not has_reducer:
+        
+        # Check if critical issues apply specifically to this criterion
+        criterion_specific_critical = False
+        if criterion_id == "graph_orchestration" and critical_issues:
+            criterion_specific_critical = True
+        
+        if criterion_specific_critical and not has_reducer:
             score = 1
         elif has_reducer and has_safe_tools and not critical_issues:
             score = 5
         else:
-            score = 3
+            if criterion_id == "graph_orchestration" and not has_reducer:
+                score = 2
+            else:
+                score = 3
 
         prosecutor_op = by_criterion.get(criterion_id, {}).get("Prosecutor")
         defense_op = by_criterion.get(criterion_id, {}).get("Defense")

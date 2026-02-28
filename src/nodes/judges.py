@@ -1,3 +1,4 @@
+import os
 from typing import Any, Dict, List
 
 from src.state import (
@@ -8,22 +9,20 @@ from src.state import (
     JudicialOpinion,
 )
 from src.tools.chief_justice_tools import (
-    dissent_summary,
+    detect_score_variance,
     final_score_for_criterion,
     get_opinions_by_criterion,
-    remediation_for_criterion,
+)
+from src.tools.justice_tools import (
+    ollama_chat,
+    truncate,
 )
 
 
 def chief_justice_node(state: AgentState) -> AgentState:
     """
     Chief Justice: aggregates JudicialOpinions (Prosecutor, Defense, Tech Lead) per criterion,
-    applies hardcoded deliberation rules, and produces the Audit Report (Markdown-structured).
-
-    Deliberation protocol:
-    - Rule of Security: Prosecutor-identified security vulnerability caps score at 3.
-    - Rule of Evidence: Defense "Deep Metacognition" overruled if no PDF report in evidence.
-    - Rule of Functionality: Tech Lead confirmation on architecture carries highest weight for Architecture criterion.
+    applies deterministic deliberation rules, and synthesizes an LLM Audit Report.
 
     Output: AuditReport with verdict (final score per criterion), dissent summary, and remediation plan.
     """
@@ -45,33 +44,50 @@ def chief_justice_node(state: AgentState) -> AgentState:
 
     by_criterion = get_opinions_by_criterion(opinions)
     criterion_ids = sorted(by_criterion.keys())
-    if not criterion_ids:
-        for dim in all_dimensions:
-            cid = dim.get("id")
-            if cid and cid not in criterion_ids:
-                criterion_ids.append(cid)
-        criterion_ids = sorted(set(criterion_ids))
+    
+    # Configuration
+    ollama_model = os.environ.get("OLLAMA_MODEL")
+    ollama_host = os.environ.get("OLLAMA_HOST")
+    use_ollama = (
+        os.environ.get("USE_OLLAMA", "1").strip()
+        not in {"0", "false", "False"}
+    )
 
     criteria_results: List[CriterionResult] = []
+    
     for criterion_id in criterion_ids:
         ops = by_criterion.get(criterion_id, {})
         prosecutor_op = ops.get("Prosecutor")
         defense_op = ops.get("Defense")
         tech_lead_op = ops.get("TechLead")
 
+        # 1. Deterministic Final Score
         final_score = final_score_for_criterion(
             criterion_id, prosecutor_op, defense_op, tech_lead_op, evidences
         )
-        dissent = dissent_summary(
-            criterion_id, prosecutor_op, defense_op, tech_lead_op
-        )
-        remediation = remediation_for_criterion(
-            prosecutor_op, tech_lead_op, final_score
-        )
+
+        # 2. Dissent Summary (High Variance > 2)
+        dissent = None
+        if detect_score_variance(prosecutor_op, defense_op, tech_lead_op):
+            if use_ollama and ollama_model and ollama_host:
+                prompt = f"""
+                You are the Chief Justice. There is high variance (>2) in judge scores for '{id_to_name.get(criterion_id)}'.
+                Prosecutor ({prosecutor_op.score if prosecutor_op else 'N/A'}): {prosecutor_op.argument if prosecutor_op else ''}
+                Defense ({defense_op.score if defense_op else 'N/A'}): {defense_op.argument if defense_op else ''}
+                Tech Lead ({tech_lead_op.score if tech_lead_op else 'N/A'}): {tech_lead_op.argument if tech_lead_op else ''}
+                
+                Provide a single paragraph 'Dissent Summary' explaining the specific trade-offs (e.g., security vs innovation).
+                Respond with ONLY the dissent text.
+                """.strip()
+                dissent = ollama_chat(model=ollama_model, prompt=truncate(prompt, 8000), host=ollama_host)
+            
+            if not dissent:
+                dissent = f"High variance detected: Scores range from {min(s for s in [prosecutor_op.score if prosecutor_op else None, defense_op.score if defense_op else None, tech_lead_op.score if tech_lead_op else None] if s is not None)} to {max(s for s in [prosecutor_op.score if prosecutor_op else None, defense_op.score if defense_op else None, tech_lead_op.score if tech_lead_op else None] if s is not None)}. Significant conflict between judge perspectives."
 
         judge_opinions_for_criterion = [
             op for op in opinions if op.criterion_id == criterion_id
         ]
+        
         criteria_results.append(
             CriterionResult(
                 dimension_id=criterion_id,
@@ -79,7 +95,7 @@ def chief_justice_node(state: AgentState) -> AgentState:
                 final_score=final_score,
                 judge_opinions=judge_opinions_for_criterion,
                 dissent_summary=dissent,
-                remediation=remediation,
+                remediation="Detailed in Remediation Plan",
             )
         )
 
@@ -90,43 +106,72 @@ def chief_justice_node(state: AgentState) -> AgentState:
     )
     repo_url = state.get("repo_url") or ""
 
-    remediation_plan = "\n\n".join(
-        f"## {c.dimension_name} ({c.dimension_id})\n{c.remediation}"
-        for c in criteria_results
+    # --- Synthesis of Audit Report Narrative ---
+
+    # A. Executive Summary
+    exec_sum_header = f"# The Verdict\n\nOverall Aggregate Score: {round(overall_score, 2)}\n\n"
+    table = "| Criterion | Final Score |\n|-----------|-------------|\n"
+    for c in criteria_results:
+        table += f"| {c.dimension_name} | {c.final_score} |\n"
+    
+    executive_summary = exec_sum_header + table
+    
+    if use_ollama and ollama_model and ollama_host:
+        prompt = f"""
+        You are the Chief Justice. Synthesize a professional Executive Summary narrative for this Audit Report.
+        Repo: {repo_url}
+        Aggregate Score: {overall_score}
+        Score Table Data: {[(c.dimension_name, c.final_score) for c in criteria_results]}
+        
+        Provide a concise overall verdict regarding architectural soundess and engineering rigor.
+        Output ONLY the Markdown narrative.
+        """.strip()
+        narrative = ollama_chat(model=ollama_model, prompt=truncate(prompt, 8000), host=ollama_host)
+        if narrative:
+            executive_summary += "\n" + narrative
+
+    # B. Criterion Breakdown Narrative
+    breakdown_parts = ["\n# Criterion Breakdown"]
+    for c in criteria_results:
+        breakdown_parts.append(f"\n## {c.dimension_name} (Score: {c.final_score})")
+        for op in c.judge_opinions:
+            breakdown_parts.append(f"- **{op.judge}** ({op.score}): {op.argument}")
+        if c.dissent_summary:
+            breakdown_parts.append(f"\n> [!IMPORTANT]\n> **Dissent:** {c.dissent_summary}")
+
+    # C. Remediation Plan
+    remediation_plan = "# The Remediation Plan\n\n"
+    if use_ollama and ollama_model and ollama_host:
+        prompt = f"""
+        You are the Chief Justice. Create a cohesive, file-level Remediation Plan.
+        Focus on low scores: {[c.dimension_name for c in criteria_results if c.final_score <= 3]}
+        Consult judge feedback: {[op.argument[:300] for op in opinions if op.score <= 3]}
+        
+        Output a structured Markdown plan with specific actionable instructions for improvement.
+        """.strip()
+        rem_text = ollama_chat(model=ollama_model, prompt=truncate(prompt, 8000), host=ollama_host)
+        if rem_text:
+            remediation_plan += rem_text
+    else:
+        remediation_plan += "Address gaps identified in judge opinions, particularly regarding graph orchestration and state management."
+
+    full_narrative = (
+        executive_summary + "\n" + "\n".join(breakdown_parts) + "\n\n" + remediation_plan
     )
 
-    executive_summary_parts = [
-        "# The Verdict",
-        "",
-        "| Criterion | Final Score |",
-        "|-----------|-------------|",
-    ]
-    for c in criteria_results:
-        executive_summary_parts.append(f"| {c.dimension_name} | {c.final_score} |")
-    executive_summary_parts.extend([
-        "",
-        "# The Dissent",
-        "",
-    ])
-    for c in criteria_results:
-        executive_summary_parts.append(f"## {c.dimension_name}")
-        executive_summary_parts.append("")
-        executive_summary_parts.append(c.dissent_summary or "")
-        executive_summary_parts.append("")
-    executive_summary_parts.extend([
-        "",
-        "# The Remediation Plan",
-        "",
-        remediation_plan,
-    ])
-
-    executive_summary = "\n".join(executive_summary_parts)
+    # D. Save to file
+    os.makedirs("audit", exist_ok=True)
+    with open("audit/audit_report.md", "w") as f:
+        f.write(full_narrative)
 
     report = AuditReport(
         repo_url=repo_url,
-        executive_summary=executive_summary,
+        executive_summary=full_narrative,
         overall_score=round(overall_score, 2),
         criteria=criteria_results,
         remediation_plan=remediation_plan,
     )
-    return {"final_report": report}
+    return {
+        "final_report": report,
+        "rendered_report": full_narrative,
+    }
