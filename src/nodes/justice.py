@@ -396,9 +396,178 @@ def defense_attorney_node(state: AgentState) -> AgentState:
 
 def tech_lead_node(state: AgentState) -> AgentState:
     """
-    LangGraph node that performs the tech lead's role:  
+    LangGraph node that performs the tech lead's role (The Pragmatic Lens):
 
-    - Reviews the evidence and the opinions.
-    - Provides a final report.
+    - Philosophy: "Does it actually work? Is it maintainable?"
+    - Focus on artifacts: reducer usage (operator.add), tool isolation, safety.
+    - Tie-breaker when Prosecutor (e.g. 1) and Defense (e.g. 5) disagree: assess technical debt.
+    - Outputs realistic score (1, 3, or 5) and technical remediation advice via local Ollama.
     """
-    return {}
+    evidences: Dict[str, List[Evidence]] = state.get("evidences", {}) or {}
+    existing_opinions_raw: List[Any] = state.get("opinions", []) or []
+    existing_opinions: List[JudicialOpinion] = [
+        op for op in existing_opinions_raw if isinstance(op, JudicialOpinion)
+    ]
+
+    github_rubric: List[Dict] = state.get("github_rubric") or []
+    pdf_report_rubric: List[Dict] = state.get("pdf_report_rubric") or []
+    pdf_images_rubric: List[Dict] = state.get("pdf_images_rubric") or []
+
+    all_dimensions: List[Dict] = (
+        github_rubric + pdf_report_rubric + pdf_images_rubric
+    )
+
+    # Index existing opinions by criterion_id and judge (for tie-breaker context if present)
+    by_criterion: Dict[str, Dict[str, JudicialOpinion]] = {}
+    for op in existing_opinions:
+        cid = op.criterion_id
+        if cid not in by_criterion:
+            by_criterion[cid] = {}
+        by_criterion[cid][op.judge] = op
+
+    # Artifact checks: focus on "does it actually work?" (reducer, tool safety)
+    repo_evs = evidences.get("RepoInvestigator", [])
+    repo_text = "\n".join(ev.content or "" for ev in repo_evs)
+    doc_evs = evidences.get("DocAnalyst", [])
+    doc_text = "\n".join(ev.content or "" for ev in doc_evs)
+    combined_artifacts = (repo_text + "\n" + doc_text).lower()
+
+    has_reducer = any(
+        phrase in combined_artifacts
+        for phrase in [
+            "operator.add",
+            "operator.ior",
+            "annotated",
+            "reducer",
+            "reducers",
+        ]
+    )
+    has_safe_tools = any(
+        phrase in combined_artifacts
+        for phrase in [
+            "isolat",
+            "safe",
+            "tool call",
+            "timeout",
+            "sanit",
+        ]
+    )
+    critical_issues = any(
+        phrase in combined_artifacts
+        for phrase in [
+            "not detected",
+            "no edges",
+            "missing",
+            "linear pipeline",
+            "bypassed",
+        ]
+    )
+
+    ollama_model = os.environ.get("OLLAMA_MODEL")
+    ollama_host = os.environ.get("OLLAMA_HOST")
+    use_ollama = (
+        os.environ.get("USE_OLLAMA", "1").strip()
+        not in {"0", "false", "False"}
+    )
+    evidence_snippets = flatten_evidence_snippets(evidences) if use_ollama else ""
+
+    tech_lead_opinions: List[JudicialOpinion] = []
+
+    for dim in all_dimensions:
+        criterion_id = dim.get("id")
+        if not criterion_id:
+            continue
+        criterion_name = str(dim.get("name") or "")
+        forensic_instruction = str(dim.get("forensic_instruction") or "")
+
+        # Realistic score: 1 (critical), 3 (debt but viable), 5 (sound)
+        if critical_issues and not has_reducer:
+            score = 1
+        elif has_reducer and has_safe_tools and not critical_issues:
+            score = 5
+        else:
+            score = 3
+
+        prosecutor_op = by_criterion.get(criterion_id, {}).get("Prosecutor")
+        defense_op = by_criterion.get(criterion_id, {}).get("Defense")
+        tie_breaker_context = ""
+        if prosecutor_op is not None and defense_op is not None:
+            tie_breaker_context = (
+                f"Prosecutor score: {prosecutor_op.score}. Defense score: {defense_op.score}. "
+                "You are the tie-breaker: assess technical debt and give a realistic score (1, 3, or 5) with remediation."
+            )
+
+        argument_chunks: List[str] = [
+            'Core philosophy: "Does it actually work? Is it maintainable?"',
+            "Ignore the Vibe and the Struggle; focus on the artifacts.",
+        ]
+        argument_chunks.append(
+            f"Artifact check: reducer usage in state={'yes' if has_reducer else 'no'}; "
+            f"tool safety / isolation signals={'yes' if has_safe_tools else 'no'}; "
+            f"critical issues (e.g. linear pipeline, bypassed structure)={'yes' if critical_issues else 'no'}."
+        )
+        if tie_breaker_context:
+            argument_chunks.append(tie_breaker_context)
+        argument_chunks.append(
+            "Provide a short technical assessment and concrete remediation advice (what to change in code or design)."
+        )
+
+        cited_evidence: List[str] = []
+        seen_locations: set = set()
+        for ev_list in evidences.values():
+            for ev in ev_list:
+                loc = (ev.location or "").strip()
+                if loc and loc not in seen_locations:
+                    seen_locations.add(loc)
+                    cited_evidence.append(loc)
+
+        argument_text = " ".join(argument_chunks).strip()
+
+        if use_ollama and ollama_model and ollama_host and evidence_snippets:
+            prompt = f"""
+        You are the Tech Lead in a software code courtroom (The Pragmatic Lens).
+        Your core philosophy is: "Does it actually work? Is it maintainable?"
+
+        You are the tie-breaker. The Prosecutor tends to argue for low scores (security/structure flaws); the Defense argues for high scores (effort, spirit of the law). Your job is to focus only on the artifacts and technical merit.
+
+        Context for this opinion:
+        - judge: "TechLead" 
+        - criterion_id: {criterion_id}
+        - criterion_name: {criterion_name}
+        - forensic_instruction: {forensic_instruction}
+        - score (already set): {score}
+
+        {tie_breaker_context}
+
+        Structured reasoning so far:
+        {argument_text}
+
+        Evidence from the Detective layer (summarised):
+        {evidence_snippets}
+
+        Your task:
+        1. Ignore "vibe" and "struggle." Focus on: Is operator.add (or equivalent) actually used to prevent data overwriting in state? Are tool calls isolated and safe?
+        2. If the Prosecutor would say 1 (security flaw) and Defense would say 5 (great effort), assess Technical Debt and give a realistic 1, 3, or 5. The score for this opinion is already set to {score}; explain why that technical score is justified.
+        3. Provide brief, concrete technical remediation advice (what to change in code or architecture). Output ONLY the argument prose—no JSON, no labels, no meta-commentary.
+        """.strip()
+
+            drafted = ollama_chat(
+                model=ollama_model,
+                prompt=truncate(prompt, 12000),
+                host=ollama_host,
+                timeout_s=40.0,
+            )
+            if drafted:
+                argument_text = drafted
+
+        tech_lead_opinions.append(
+            JudicialOpinion(
+                judge="TechLead",
+                criterion_id=criterion_id,
+                score=score,
+                argument=argument_text,
+                cited_evidence=cited_evidence,
+            )
+        )
+
+    return {"opinions": tech_lead_opinions}
