@@ -81,6 +81,9 @@ def prosecutor_node(state: AgentState) -> AgentState:
                 ]
             )
 
+            # Cross-check with any vision evidence about diagrams.
+            vision_evs = evidences.get("VisionInspector", [])
+
             if fan_out_missing:
                 # Rubric demands parallel orchestration but the
                 # forensic evidence points to a linear or under-specified
@@ -91,23 +94,20 @@ def prosecutor_node(state: AgentState) -> AgentState:
                     "and Judges in the StateGraph wiring."
                 )
                 charges.append("Bypassed Structure (claimed parallel, built linear)")
-
-            # Cross-check with any vision evidence about diagrams.
-            vision_evs = evidences.get("VisionInspector", [])
-            if any(not ev.found for ev in vision_evs):
-                score = 1
+            elif any(not ev.found for ev in vision_evs):
+                # Missing diagram is a deduction, but not necessarily a total failure
+                # if the code itself is parallel.
+                score = min(score, 3) 
                 missing_elements.append(
                     "Accurate StateGraph diagram that clearly distinguishes "
                     "parallel branches from sequential steps."
                 )
-                charges.append("Misleading Architecture Visual / Missing Diagram Proof")
+                charges.append("Missing Diagram Proof")
 
             argument_chunks.append(
-                "If the rubric asks for Parallel Orchestration but the evidence "
-                "shows a linear pipeline (or missing fan-out/fan-in markers), "
-                "I argue for a score of 1. I look specifically for bypassed "
-                "structure (no parallel branches, no synchronization node, "
-                "no conditional edges)."
+                "I scrutinized the graph architecture for parallel fan-out/fan-in. "
+                "The core code structure and visual evidence must align to prove "
+                "orchestration rigor."
             )
 
         # --------------------------------------------------
@@ -212,7 +212,7 @@ def prosecutor_node(state: AgentState) -> AgentState:
             prompt = """
                 You are the Prosecutor, an adversarial forensic auditor. Your core philosophy is: 'Trust No One. Assume Vibe Coding.'
                 Your goal is to scrutinize evidence for gaps, security flaws, and orchestration fraud. For the provided criterion, you must:
-                - Identify Failure Patterns: Look specifically for linear execution when parallelism is required or missing state reducers.
+                - Identify Failure Patterns: Look specifically for linear execution when parallelism is required. Check if state reducers (operator.add, operator.ior) or Annotated type hints are MISSING in the state definition.
                 - Cite Hard Evidence: Do not just list filenames. You must extract and cite specific commit hashes, code line numbers, or JSON keys that prove the implementation is lacking.
                 - Charge the Defendant: If the evidence is missing or weak, explicitly charge them with 'Orchestration Fraud' or 'Hallucination Liability' and cap their score accordingly.
                 - Output Format: You must return a valid JudicialOpinion JSON object.
@@ -367,8 +367,8 @@ def defense_attorney_node(state: AgentState) -> AgentState:
         {evidence_snippets}
 
         Your task:
-        1. If the code or repo is imperfect but the architecture report or docs show deep understanding of LangGraph, state reducers, or orchestration, argue that the student matches the "Master Thinker" profile despite syntax or implementation gaps.
-        2. If Git history or repo evidence suggests struggle and iteration (commits, branches, refactors), argue for a higher score based on "Engineering Process" and reward the journey.
+        1. If the code or repo is imperfect but the architecture report or docs show deep understanding of LangGraph, state reducers (operator.add, operator.ior), or orchestration, argue that the student matches the "Master Thinker" profile despite syntax or implementation gaps.
+        2. If Git history or repo evidence suggests struggle and iteration (commits, branches, refactors, use of Annotated type hints), argue for a higher score based on "Engineering Process" and reward the journey.
         3. Write a single, constructive paragraph that emphasizes strengths, intent, and the spirit of the law. Output ONLY the argument prose—no JSON, no labels, no meta-commentary.
         """.strip()
 
@@ -487,14 +487,21 @@ def tech_lead_node(state: AgentState) -> AgentState:
         if criterion_id == "graph_orchestration" and critical_issues:
             criterion_specific_critical = True
         
-        if criterion_specific_critical and not has_reducer:
-            score = 1
+        if criterion_specific_critical:
+            if not has_reducer:
+                score = 1
+            else:
+                score = 3
         elif has_reducer and has_safe_tools and not critical_issues:
             score = 5
+        elif has_reducer or has_safe_tools:
+            # If they have at least one or the other, it's a solid 4 (maintainable)
+            score = 4
         else:
             if criterion_id == "graph_orchestration" and not has_reducer:
                 score = 2
             else:
+                # Default for viable but non-exceptional implementation
                 score = 3
 
         prosecutor_op = by_criterion.get(criterion_id, {}).get("Prosecutor")
@@ -555,7 +562,7 @@ def tech_lead_node(state: AgentState) -> AgentState:
         {evidence_snippets}
 
         Your task:
-        1. Ignore "vibe" and "struggle." Focus on: Is operator.add (or equivalent) actually used to prevent data overwriting in state? Are tool calls isolated and safe?
+        1. Ignore "vibe" and "struggle." Focus on: Is operator.add, operator.ior, or Annotated actually used in the state definition to prevent data overwriting? Are tool calls isolated and safe?
         2. If the Prosecutor would say 1 (security flaw) and Defense would say 5 (great effort), assess Technical Debt and give a realistic 1, 3, or 5. The score for this opinion is already set to {score}; explain why that technical score is justified.
         3. Provide brief, concrete technical remediation advice (what to change in code or architecture). Output ONLY the argument prose—no JSON, no labels, no meta-commentary.
         """.strip()

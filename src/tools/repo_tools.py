@@ -138,6 +138,9 @@ def analyze_state_structure(path: str) -> Dict[str, Any]:
         "edges": [],
         "fan_out_detected": False,
         "fan_in_detected": False,
+        "operator_add_detected": False,
+        "operator_ior_detected": False,
+        "annotated_detected": False,
         "files_analyzed": [],
         "errors": [],
     }
@@ -160,6 +163,13 @@ def analyze_state_structure(path: str) -> Dict[str, Any]:
     for py_file in python_files:
         try:
             source = py_file.read_text(encoding="utf-8")
+            if "operator.add" in source:
+                results["operator_add_detected"] = True
+            if "operator.ior" in source:
+                results["operator_ior_detected"] = True
+            if "Annotated" in source:
+                results["annotated_detected"] = True
+                
             tree = ast.parse(source)
             analyzer.visit(tree)
             results["files_analyzed"].append(str(py_file))

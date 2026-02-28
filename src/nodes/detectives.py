@@ -46,6 +46,13 @@ def _summarize_repo_forensics(
     else:
         lines.append("- Typed state schema: NOT detected")
 
+    if graph_findings.get("operator_add_detected"):
+        lines.append("- operator.add reducer: detected")
+    if graph_findings.get("operator_ior_detected"):
+        lines.append("- operator.ior reducer: detected")
+    if graph_findings.get("annotated_detected"):
+        lines.append("- Annotated type hint: detected")
+
     # ------------------------------------------------------
     # Protocol B — Graph Wiring
     # ------------------------------------------------------
