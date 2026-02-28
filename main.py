@@ -20,6 +20,7 @@ def build_initial_state(repo_url: str, pdf_path: str) -> Dict[str, Any]:
         "rubric_dimensions": [],
         "evidences": {},
         "opinions": [],
+        "rendered_report": None,
         "final_report": None,
     }
 
@@ -51,7 +52,8 @@ def main(argv: List[str] | None = None) -> None:
 
     with SqliteSaver.from_conn_string("audit_history.sqlite") as memory:
         graph = builder.compile(checkpointer=memory)
-        config = {"configurable": {"thread_id": "audit_run_1"}}
+        import uuid
+        config = {"configurable": {"thread_id": f"audit_run_{uuid.uuid4()}"}}
         result_state = graph.invoke(state, config=config)
 
     print("=== Automaton Auditor run complete ===")
@@ -59,6 +61,10 @@ def main(argv: List[str] | None = None) -> None:
     print(f"Evidence keys: {list(result_state.get('evidences', {}).keys())}")
     print(f"Opinions count: {len(result_state.get('opinions', []))}")
     print(f"Final report present: {result_state.get('final_report') is not None}")
+    
+    if result_state.get("rendered_report"):
+        print("\n=== FINAL AUDIT REPORT ===\n")
+        print(result_state.get("rendered_report"))
 
 
 if __name__ == "__main__":
