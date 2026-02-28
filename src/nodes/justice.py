@@ -348,29 +348,29 @@ def defense_attorney_node(state: AgentState) -> AgentState:
 
         if use_ollama and ollama_model and ollama_host and evidence_snippets:
             prompt = f"""
-You are the Defense Attorney in a software code courtroom (The Optimistic Lens).
-Your core philosophy is: "Reward Effort and Intent. Look for the Spirit of the Law."
+        You are the Defense Attorney in a software code courtroom (The Optimistic Lens).
+        Your core philosophy is: "Reward Effort and Intent. Look for the Spirit of the Law."
 
-You are producing the argument field of a JudicialOpinion that highlights strengths and argues for a generous score.
+        You are producing the argument field of a JudicialOpinion that highlights strengths and argues for a generous score.
 
-Context for this opinion:
-- judge: "Defense"
-- criterion_id: {criterion_id}
-- criterion_name: {criterion_name}
-- forensic_instruction: {forensic_instruction}
-- score (already set): {score}
+        Context for this opinion:
+        - judge: "Defense"
+        - criterion_id: {criterion_id}
+        - criterion_name: {criterion_name}
+        - forensic_instruction: {forensic_instruction}
+        - score (already set): {score}
 
-Structured reasoning so far:
-{argument_text}
+        Structured reasoning so far:
+        {argument_text}
 
-Evidence from the Detective layer (summarised):
-{evidence_snippets}
+        Evidence from the Detective layer (summarised):
+        {evidence_snippets}
 
-Your task:
-1. If the code or repo is imperfect but the architecture report or docs show deep understanding of LangGraph, state reducers, or orchestration, argue that the student matches the "Master Thinker" profile despite syntax or implementation gaps.
-2. If Git history or repo evidence suggests struggle and iteration (commits, branches, refactors), argue for a higher score based on "Engineering Process" and reward the journey.
-3. Write a single, constructive paragraph that emphasizes strengths, intent, and the spirit of the law. Output ONLY the argument prose—no JSON, no labels, no meta-commentary.
-""".strip()
+        Your task:
+        1. If the code or repo is imperfect but the architecture report or docs show deep understanding of LangGraph, state reducers, or orchestration, argue that the student matches the "Master Thinker" profile despite syntax or implementation gaps.
+        2. If Git history or repo evidence suggests struggle and iteration (commits, branches, refactors), argue for a higher score based on "Engineering Process" and reward the journey.
+        3. Write a single, constructive paragraph that emphasizes strengths, intent, and the spirit of the law. Output ONLY the argument prose—no JSON, no labels, no meta-commentary.
+        """.strip()
 
             drafted = ollama_chat(
                 model=ollama_model,
